@@ -4,9 +4,9 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /Global Options1
         - /TF1/Frames1
         - /TF1/Tree1
+        - /Local Planning1
         - /Global Planning1
         - /Global Planning1/Costmap1
         - /Path2/Offset1
@@ -118,6 +118,11 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
+        mount_asus_xtion_pro_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         plate_bottom_link:
           Alpha: 1
           Show Axes: false
@@ -257,10 +262,10 @@ Visualization Manager:
           Class: rviz/Map
           Color Scheme: costmap
           Draw Behind: false
-          Enabled: false
+          Enabled: true
           Name: Costmap
           Topic: /move_base/local_costmap/costmap
-          Value: false
+          Value: true
         - Alpha: 0.5
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -273,7 +278,7 @@ Visualization Manager:
           Color: 255; 255; 255
           Color Transformer: Intensity
           Decay Time: 0
-          Enabled: false
+          Enabled: true
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Max Intensity: 379.6
@@ -289,7 +294,7 @@ Visualization Manager:
           Topic: /move_base/DWAPlannerROS/cost_cloud
           Use Fixed Frame: true
           Use rainbow: true
-          Value: false
+          Value: true
         - Alpha: 1
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -302,7 +307,7 @@ Visualization Manager:
           Color: 255; 255; 255
           Color Transformer: Intensity
           Decay Time: 0
-          Enabled: false
+          Enabled: true
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Max Intensity: 128.275
@@ -318,8 +323,8 @@ Visualization Manager:
           Topic: /move_base/DWAPlannerROS/trajectory_cloud
           Use Fixed Frame: true
           Use rainbow: false
-          Value: false
-      Enabled: true
+          Value: true
+      Enabled: false
       Name: Local Planning
     - Class: rviz/Group
       Displays:
@@ -327,11 +332,11 @@ Visualization Manager:
           Class: rviz/Map
           Color Scheme: costmap
           Draw Behind: true
-          Enabled: false
+          Enabled: true
           Name: Costmap
           Topic: /move_base/global_costmap/costmap
-          Value: false
-      Enabled: true
+          Value: true
+      Enabled: false
       Name: Global Planning
     - Alpha: 1
       Axes Length: 1
@@ -369,7 +374,7 @@ Visualization Manager:
       Color: 0; 255; 0
       Enabled: true
       Name: Path
-      Topic: lab4/path
+      Topic: /path_gc
       Value: true
     - Alpha: 1
       Class: rviz/GridCells
@@ -380,17 +385,10 @@ Visualization Manager:
       Value: true
     - Alpha: 0.3
       Class: rviz/GridCells
-      Color: 0; 255; 255
+      Color: 173; 0; 0
       Enabled: true
       Name: Frontier
-      Topic: lab4/frontier
-      Value: true
-    - Alpha: 0.1
-      Class: rviz/GridCells
-      Color: 0; 0; 0
-      Enabled: true
-      Name: Obstacles
-      Topic: lab4/obstacles
+      Topic: /frontier_gc
       Value: true
     - Alpha: 1
       Buffer Length: 1
@@ -443,7 +441,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 3.12768
+      Distance: 4.40879
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.06
         Stereo Focal Distance: 1
@@ -458,7 +456,7 @@ Visualization Manager:
       Pitch: 1.5698
       Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 6.27322
+      Yaw: 0.0400324
     Saved: ~
 Window Geometry:
   Displays:
@@ -476,5 +474,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1301
-  X: 45
+  X: 33
   Y: 14

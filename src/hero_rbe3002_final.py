@@ -10,7 +10,7 @@ from map_msgs.msg import OccupancyGridUpdate
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from nav_msgs.srv import GetMap
 
-'''---------------------------------------Callback Functions--------------------------------------------'''
+#---------------------------------------Callback Functions--------------------------------------------
 
 def cost_map_callback(msg):
     global map_width, map_height, cost_map, cell_res, map_origin
@@ -24,7 +24,6 @@ def cost_map_callback(msg):
     # Create cost_map
     cost_map = [[cell_costs[y*map_width + x] for y in range(map_height)] for x in range(map_width)]
     
-    update_walls()
     detect_frontiers()
 
 def cost_map_update_callback(msg):
@@ -46,7 +45,6 @@ def cost_map_update_callback(msg):
                     pass
             i += 1
     
-    update_walls()
     detect_frontiers()
 
 def local_cost_map_callback(msg):
@@ -69,11 +67,10 @@ def local_cost_map_callback(msg):
                 if local_cell_costs[i] != 0:
                     cost_map[x][y] = local_cell_costs[i]
                 i += 1
-        update_walls()
     except:
         print "Map still not ready"
 
-# ********************???
+# Check if turtlebot has 
 def move_status_callback(msg):
     global last_active_goal, at_goal
     for goal in msg.status_list:
@@ -85,11 +82,13 @@ def move_status_callback(msg):
             if goal.goal_id.id == last_active_goal.goal_id.id:
                 if 2 <= goal.status <= 3:
                     at_goal = True
-                    print "Goal completed, moving to next centroid."
+                    print "DEBUG_CB: move_status_callback():", goal.status
+                    # Rotate turtlebot 360 deg
                     move_to_next_waypoint()
                 elif 4 <= goal.status <= 5:  # Goal unreachable or rejected
                     at_goal = True
-                    print "Goal unreachable or other error."
+                    print "DEBUG_CB: move_status_callback():", goal.status
+                    # Rotate turtlebot 360 deg
                     move_to_next_waypoint()
 
 # Odometry Callback function.
@@ -97,7 +96,7 @@ def read_odom(msg):
     global pose
     pose = msg.pose
 
-'''-----------------------------------------Helper Functions--------------------------------------------'''
+#-----------------------------------------Helper Functions--------------------------------------------
 
 # (real world) -> (grid)
 def world_to_grid(w_pt):
@@ -207,11 +206,8 @@ def nearest_empty_cell(cell):
             unexplored.extend(get_neighbors(cell_buf))
 
 def cur_dist_to_cell(cell):
-    cur_pos = Point()
-    cur_pos.x = pose.pose.position.x
-    cur_pos.y = pose.pose.position.y
-    cur_coords = world_to_grid(cur_pos)
-    return math.sqrt(float((cell.x - cur_coords.x)**2 + (cell.y - cur_coords.y)**2))
+    cur_pos = get_cur_pos()
+    return math.sqrt(float((cell.x - cur_pos.x)**2 + (cell.y - cur_pos.y)**2))
 
 def request_map(event):
     get_map_srv = rospy.ServiceProxy('/dynamic_map', GetMap)
@@ -220,26 +216,15 @@ def request_map(event):
 def sort_by_x(cell_list):
     return sorted(cell_list, key=lambda x: x.x, reverse=True)
 
-'''-----------------------------------------Update Grid Functions---------------------------------------'''
+def get_cur_pos():
+    cur_pos = Point()
+    cur_pos.x = pose.pose.position.x
+    cur_pos.y = pose.pose.position.y
+    cur_coords = world_to_grid(cur_pos)
+    return cur_coords
 
-def update_walls():
-    global wall_pub
 
-    wall_cells = []
-    for y in range(map_height):
-        for x in range(map_width):
-            if cost_map[x][y] > 25:
-                cell = Point(x, y, 0)
-                wall_cells.append(cell)
-    
-    wall_msg = GridCells()
-    wall_msg.header.frame_id = 'map'
-    wall_msg.cell_width = cell_res
-    wall_msg.cell_height = cell_res
-    wall_msg.cells = wall_cells
-    wall_pub.publish(wall_msg)
-
-    return wall_cells
+#-----------------------------------------Update Grid Functions---------------------------------------
 
 def update_frontier():
     global frontier_pub
@@ -275,7 +260,7 @@ def update_path(waypoints):
     return path_msg
 
 
-'''----------------------------------------Navigation Functions-----------------------------------------'''
+#----------------------------------------Navigation Functions-----------------------------------------
 
 # Move to Next Waypoint
 def move_to_next_waypoint():
@@ -284,12 +269,15 @@ def move_to_next_waypoint():
     goal_pose.target_pose.header.frame_id = 'map'
     goal_pose.target_pose.header.stamp = rospy.Time.now()
     goal_pose.target_pose.pose.position = grid_to_world(cur_goal)
-    # Modify orientation?
-    o_w, o_x, o_y, o_z = quaternion_from_euler(0.0, 0.0, 0.0)
-    goal_pose.target_pose.pose.orientation.w = o_w
+    # Modify orientation to face movement heading
+    dx = goal_pose.target_pose.pose.position.x - pose.pose.position.x
+    dy = goal_pose.target_pose.pose.position.y - pose.pose.position.y
+    new_ori = math.atan2(dy, dx)
+    o_x, o_y, o_z, o_w = quaternion_from_euler(0.0, 0.0, new_ori)
     goal_pose.target_pose.pose.orientation.x = o_x
     goal_pose.target_pose.pose.orientation.y = o_y
     goal_pose.target_pose.pose.orientation.z = o_z
+    goal_pose.target_pose.pose.orientation.w = o_w
 
     # Navigate to goal_pose
     move_base.send_goal(goal_pose)
@@ -310,7 +298,6 @@ def detect_frontiers():
     frontier_fragments = merge_frontiers(sorted_f_cells)
 
     # Calculate the centroid of all of the frontiers
-    # CUR_DEBUG ***
     print "DEBUG_3: calc_centroids()"
     centroids = calc_centroids(frontier_fragments)
 
@@ -339,10 +326,16 @@ def detect_frontiers():
             max_i = i
 
     # The most heavily weighted centroid aka nearest fragment closest to completion
-    cur_goal = centroids[max_i]
+    best_sol = centroids[max_i]
+    cur_pos = get_cur_pos()
+    cur_goal = Point()
+    cur_goal.x = cur_pos.x + int(0.8*(best_sol.x - cur_pos.x))
+    cur_goal.y = cur_pos.y + int(0.8*(best_sol.y - cur_pos.y))
+    print 'DEBUG_cur_goal_UPDATE:'
+    print cur_goal
 
 
-'''-------------------------------------------Main Function---------------------------------------------'''
+# -------------------------------------------Main Function---------------------------------------------
 
 if __name__ == '__main__':
 
@@ -369,7 +362,7 @@ if __name__ == '__main__':
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
 
     # Move Base Action Library
-    move_base = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+    move_base = actionlib.SimpleActionClient('move_base', MoveBaseAction) # /movebase_simple/goal/
     move_base.wait_for_server(rospy.Duration(5))
     
     rospy.sleep(rospy.Duration(5,0))

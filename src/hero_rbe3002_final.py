@@ -167,11 +167,13 @@ def is_neighbor(i, j):
 def calc_centroids(frontier_fragments):
     centroids = []
     print 'DEBUG_2_1: inside calc_centroids()'
+    """
     for c_a in frontier_fragments:
         print '{',
         for c_b in c_a:
             print '[', c_b.x, c_b.y, ']',
         print '}'
+    """
     for fragment in frontier_fragments:
         x_sum = 0.0
         y_sum = 0.0
@@ -184,10 +186,8 @@ def calc_centroids(frontier_fragments):
         y_c = int(y_sum/cells)
         centroid = Point(x_c, y_c, 0)
         if cost_map[x_c][y_c] < 0 or cost_map[x_c][y_c] > 25:
-            print 'DEBUG_2_2_1: nearest_empty_cell()'
             centroids.append(nearest_empty_cell(centroid))
         else:
-            print 'DEBUG_2_2_2: good centroid'
             centroids.append(centroid)
 
     return centroids
@@ -216,6 +216,9 @@ def cur_dist_to_cell(cell):
 def request_map(event):
     get_map_srv = rospy.ServiceProxy('/dynamic_map', GetMap)
     cost_map_callback(get_map_srv().map)
+
+def sort_by_x(cell_list):
+    return sorted(cell_list, key=lambda x: x.x, reverse=True)
 
 '''-----------------------------------------Update Grid Functions---------------------------------------'''
 
@@ -299,9 +302,12 @@ def detect_frontiers():
     print "DEBUG_1: update_frontiers()"
     frontier_cells = update_frontier()
     
+    # Sort frontier_cells by x coord
+    sorted_f_cells = sort_by_x(frontier_cells)
+
     # Group the frontier cells into continuous frontiers and return them as a list
     print "DEBUG_2: merge_frontiers()"
-    frontier_fragments = merge_frontiers(frontier_cells)
+    frontier_fragments = merge_frontiers(sorted_f_cells)
 
     # Calculate the centroid of all of the frontiers
     # CUR_DEBUG ***
@@ -327,7 +333,7 @@ def detect_frontiers():
 
     max_wc = 0
     max_i = 0
-    for i, wc in weighted_centroid:
+    for i, wc in enumerate(weighted_centroid):
         if wc > max_wc:
             max_wc = wc
             max_i = i

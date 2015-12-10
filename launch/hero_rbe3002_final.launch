@@ -1,0 +1,4 @@
+<launch>
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find hero_rbe3002_final)/rviz/hero_rbe3002_final.rviz" />
+    <node name="hero_rbe3002_final" pkg="hero_rbe3002_final" type="hero_rbe3002_final.py" output="screen" />
+</launch>

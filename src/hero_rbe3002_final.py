@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import actionlib, rospy, roslib, time, math, tf, numpy, copy
+import actionlib, rospy, roslib, time, math, tf, numpy, copy, random as rand
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from std_msgs.msg import Header
 from nav_msgs.msg import OccupancyGrid, GridCells, Path, Odometry
@@ -22,55 +22,14 @@ def cost_map_callback(msg):
     map_origin = msg.info.origin.position
 
     # Create cost_map
-    cost_map = [[cell_costs[y*map_width + x] for y in range(map_height)] for x in range(map_width)]
+    cost_map = [[cell_costs[y*map_width + x] for x in range(map_width)] for y in range(map_height)]
 
     detect_frontiers()
-    
-def cost_map_update_callback(msg):
-    global cost_map
-
-    local_map_width = msg.width
-    local_map_height = msg.height
-    local_cell_costs = msg.data
-    local_map_origin = Point(msg.x, msg.y, 0)
-    local_grid_origin = world_to_grid(local_map_origin)
-    
-    i = 0
-    for y in range(local_grid_origin.y, local_grid_origin.y + local_map_height):
-        for x in range(local_grid_origin.x, local_grid_origin.x + local_map_width):
-            if local_cell_costs[i] != 0:
-                try:
-                    cost_map[x][y] = local_cell_costs[i]
-                except IndexError:
-                    pass
-            i += 1
-
-def local_cost_map_callback(msg):
-    global cost_map
-
-    local_map_width = msg.info.width
-    local_map_height = msg.info.height
-    local_cell_costs = msg.data
-    local_map_origin = msg.info.origin.position
-    
-    try:
-        (position, orientation) = odom_list.lookupTransform('odom', 'map', rospy.Time(0))
-        local_map_origin.x += position[0]
-        local_map_origin.y += position[1]
-        local_grid_origin = world_to_grid(local_map_origin)
-        
-        i = 0
-        for y in range(local_grid_origin.y, local_grid_origin.y + local_map_height):
-            for x in range(local_grid_origin.x, local_grid_origin.x + local_map_width):
-                if local_cell_costs[i] != 0:
-                    cost_map[x][y] = local_cell_costs[i]
-                i += 1
-    except:
-        print "Map still not ready"
 
 # Check if turtlebot has 
 def move_status_callback(msg):
-    global last_active_goal, at_goal
+    global move_base_cancel
+    global last_active_goal, at_goal, reachable_goal
     for goal in msg.status_list:
         if goal.status < 2:
             last_active_goal = goal
@@ -80,14 +39,14 @@ def move_status_callback(msg):
             if goal.goal_id.id == last_active_goal.goal_id.id:
                 if 2 <= goal.status <= 3:
                     at_goal = True
-                    print "DEBUG_CB: move_status_callback():", goal.status
-                    # Rotate turtlebot 360 deg
+                    print "Status Received: GOOD STOP [", goal.status, ']'
                     detect_frontiers()
                     move_to_next_waypoint()
                 elif 4 <= goal.status <= 5:  # Goal unreachable or rejected
                     at_goal = True
-                    print "DEBUG_CB: move_status_callback():", goal.status
-                    # Rotate turtlebot 360 deg
+                    reachable_goal = False
+                    print "Status Received: BAD STOP [", goal.status, ']'
+                    move_base_cancel.publish(GoalID())
                     detect_frontiers()
                     move_to_next_waypoint()
 
@@ -127,19 +86,22 @@ def get_neighbors(cell):
 
 # Check if cell has cost of -1 and atleast 1 known cell
 def is_frontier_cell(cell):
-    if cost_map[cell.x][cell.y] < 0:
-        cell_neighbors = get_neighbors(cell)
-        for n in cell_neighbors:
-            if cost_map[n.x][n.y] >= 0:
-                return True
+    try:
+        if cost_map[cell.y][cell.x] < 0:
+            cell_neighbors = get_neighbors(cell)
+            for n in cell_neighbors:
+                if 0 <= cost_map[n.y][n.x] <= cost_threshold:
+                    return True
+    except IndexError:
+        print "Stupid Index Value"
     return False
 
 # Merge frontier fragments
 def merge_frontiers(frontier_cells):
     frontier_fragments = []
     f_c_buf = copy.deepcopy(frontier_cells)
-    print 'DEBUG_1_1: inside merge_frontiers()'
-    while len(f_c_buf) > 0:
+    # print 'DEBUG_1_1: inside merge_frontiers()'
+    while len(f_c_buf) > 0 and not rospy.is_shutdown():
         f_fragment = [f_c_buf.pop(0)]
         f_c_buf_v = copy.deepcopy(f_c_buf)
         for i in f_c_buf:
@@ -164,7 +126,7 @@ def is_neighbor(i, j):
 # Calculate centroids of frontier fragments
 def calc_centroids(frontier_fragments):
     centroids = []
-    print 'DEBUG_2_1: inside calc_centroids()'
+    # print 'DEBUG_2_1: inside calc_centroids()'
     '''
     for c_a in frontier_fragments:
         print '{',
@@ -183,7 +145,7 @@ def calc_centroids(frontier_fragments):
         x_c = int(x_sum/cells)
         y_c = int(y_sum/cells)
         centroid = Point(x_c, y_c, 0)
-        if cost_map[x_c][y_c] < 0 or cost_map[x_c][y_c] > cost_threshold:
+        if cost_map[y_c][x_c] < 0 or cost_map[y_c][x_c] > cost_threshold:
             centroids.append(nearest_empty_cell(centroid))
         else:
             centroids.append(centroid)
@@ -199,7 +161,7 @@ def nearest_empty_cell(cell):
         if cell_buf in explored:
             continue
         explored.append(cell_buf)
-        if 0 <= cost_map[cell_buf.x][cell_buf.y] <= cost_threshold:
+        if 0 <= cost_map[cell_buf.y][cell_buf.x] <= cost_threshold:
             return cell_buf
         else:
             unexplored.extend(get_neighbors(cell_buf))
@@ -211,9 +173,14 @@ def cur_dist_to_cell(cell):
 def request_map(event):
     get_map_srv = rospy.ServiceProxy('/dynamic_map', GetMap)
     cost_map_callback(get_map_srv().map)
+    detect_frontiers()
+
 
 def sort_by_x(cell_list):
     return sorted(cell_list, key=lambda x: x.x, reverse=True)
+
+def sort_by_priority(frag_list):
+    return sorted(frag_list, key=lambda x: x[0], reverse=True)
 
 def get_cur_pos():
     cur_pos = Point()
@@ -222,68 +189,97 @@ def get_cur_pos():
     cur_coords = world_to_grid(cur_pos)
     return cur_coords
 
-def frontier_bfs():
-    start = get_cur_pos()
+def pos_to_index(pos):
+    return pos.y*map_width + pos.x
 
-    frontier_cells, visited, queue = [], set(), [start]
+def index_to_pos(index):
+    return Point(index%map_width, int(index/map_width), 0)
+
+def frontier_bfs():
+    cur_pos = get_cur_pos()
+    start = pos_to_index(cur_pos)
+    start_n_pt_0 = get_neighbors(cur_pos)
+    start_n_pt_1 = set([])
+    for n_1 in start_n_pt_1:
+        start_n_pt = get_neighbors(n_1)
+        for n in start_n_pt:
+            start_n_pt_1.add(n)
+    start_n_pt = list(start_n_pt_1)
+    start_n = map(pos_to_index, start_n_pt)
+    frontier_cells, visited, queue = set([]), set([]), []
+    queue.append(start)
+    queue.extend(start_n)
+    # While there's stuff in the queue
     while queue and not rospy.is_shutdown():
+        # Analyze next cell in queue
         cur_cell = queue.pop(0)
+        # If cell has not been scrutinized yet
         if cur_cell not in visited:
+            # Note that cell has been scrutinized
             visited.add(cur_cell)
-            if is_frontier_cell(cur_cell):
-                frontier_cells.append(cur_cell)
-            elif cost_map[cur_cell.x][cur_cell.y] > cost_threshold:
-                pass
+            cur_cell_pt = index_to_pos(cur_cell)
+            # If the cell is a frontier cell
+            if is_frontier_cell(cur_cell_pt):
+                # Add it to the list
+                frontier_cells.add(cur_cell)
             else:
-                cur_cell_n = get_neighbors(cur_cell)
-                for v in visited:
-                    n_visited = False
-                    for n in cur_cell_n:
-                        if n.x == v.x and n.y == v.y:
-                            n_visited = True
-                            break
-                    if not n_visited:
-                        queue.append(n)
-    return frontier_cells
+                cur_cell_n_pts = get_neighbors(cur_cell_pt)
+                cur_cell_n = []
+                for n in cur_cell_n_pts:
+                    n_pt = pos_to_index(n)
+                    if cost_map[n.y][n.x] <= cost_threshold and n_pt not in queue and n_pt not in visited:
+                        cur_cell_n.append(n_pt)
+                if cur_cell_n:
+                    queue.extend(cur_cell_n)
+
+    frontier_cell_pts = map(index_to_pos, list(frontier_cells))
+    print "Frontier Cells: ", len(frontier_cell_pts)
+    return list(frontier_cell_pts)
+
+def filter_fragments(frag_list):
+    good_frags = []
+
+    for fragment in frag_list:
+        max_dist = 0
+        for cell_1 in fragment:
+            for cell_2 in fragment:
+                dx2 = (cell_2.x - cell_1.x)**2
+                dy2 = (cell_2.y - cell_1.y)**2
+                a_dist = math.sqrt(dx2 + dy2)
+                if a_dist > max_dist:
+                    max_dist = a_dist
+        if max_dist > 10:
+            good_frags.append(fragment)
+
+    return good_frags
 
 #-----------------------------------------Update Grid Functions---------------------------------------
 
 def update_frontier():
     global frontier_pub
-    print "DEBUG_0_1: inside update_frontier()"
+    # print "DEBUG_0_1: before BFS in update_frontier()"
 
     ''' Iterate over cost map'''
+    '''
     frontier_cells = []
     for y in range(map_height):
         for x in range(map_width):
             cell = Point(x, y, 0)
             if is_frontier_cell(cell):
                 frontier_cells.append(cell)
+    '''
     
-    
-    #frontier_cells = frontier_bfs()
-    print "DEBUG_0_2: after loops in update_frontier()"
+    frontier_cells = frontier_bfs()
+    # print "DEBUG_0_2: after BFS in update_frontier()"
     frontier_msg = GridCells()
     frontier_msg.header.frame_id = 'map'
     frontier_msg.cell_width = cell_res
     frontier_msg.cell_height = cell_res
-    frontier_msg.cells = frontier_cells
+    displayable_cells = map(grid_to_world, frontier_cells)
+    frontier_msg.cells = displayable_cells
     frontier_pub.publish(frontier_msg)
 
     return frontier_cells
-
-def update_path(waypoints):
-    global path_pub
-
-    path_msg = GridCells()
-    path_msg.header.frame_id = 'map'
-    path_msg.cell_width = cell_res
-    path_msg.cell_height = cell_res
-    path_msg.cells = waypoints
-    path_pub.publish(path_msg)
-
-    return path_msg
-
 
 #----------------------------------------Navigation Functions-----------------------------------------
 
@@ -309,65 +305,66 @@ def move_to_next_waypoint():
 
 # Detect Frontier cells
 def detect_frontiers():
-    global cur_goal
-    print "DEBUG_0: inside detect_frontiers()"
+    global cur_goal, reachable_goal
+    # print "DEBUG_0: inside detect_frontiers()"
 
-    print "DEBUG_1: update_frontiers()"
+    # print "DEBUG_1: update_frontiers()"
     frontier_cells = update_frontier()
     
     # Sort frontier_cells by x coord
     sorted_f_cells = sort_by_x(frontier_cells)
 
     # Group the frontier cells into continuous frontiers and return them as a list
-    print "DEBUG_2: merge_frontiers()"
+    # print "DEBUG_2: merge_frontiers()"
     frontier_fragments = merge_frontiers(sorted_f_cells)
 
-    # Calculate the centroid of all of the frontiers
-    print "DEBUG_3: calc_centroids()"
-    centroids = calc_centroids(frontier_fragments)
+    # Keep frontiers wide enough for the robot
+    good_f_fragments = filter_fragments(frontier_fragments)
 
-    print "DEBUG_4: update_path()"
-    update_path(centroids)
+    # If there are no good_f_fragments, mapping is done
+    if len(good_f_fragments) == 0:
+        print "=====================Exploration Complete======================="
+        at_goal = True
+        rospy.signal_shutdown("Exploration Complete")
+        exit()
+
+    # Calculate the centroids of all of the frontiers
+    # print "DEBUG_3: calc_centroids()"
+    centroids = calc_centroids(good_f_fragments)
 
     # Calculate the number of frontier cells in each frontier
-    frag_len = map(len, frontier_fragments)
+    frag_len = map(len, good_f_fragments)
 
     # Calculate the distance to each centroid
-    #distances = map(cur_dist_to_cell, centroids)
+    distances = map(cur_dist_to_cell, centroids)
 
-    # Weight each centroid by its distance * # of frontier cells
-    """
-    weighted_centroid = []
+    # Calculate priority of fragment based on length / distance
+    centroid_priority = []
     for i in range(len(distances)):
         try:
-            weighted_centroid.append(frag_len[i] / distances[i])
+            centroid_priority.append(frag_len[i] / distances[i])
         except ZeroDivisionError:
             print 'Division by 0 in detect_frontiers()'
     
-    max_wc = 0
-    max_i = 0
-    for i, wc in enumerate(weighted_centroid):
-        if wc > max_wc:
-            max_wc = wc
-            max_i = i
-    """
-    max_wc = 0
-    max_i = 0
-    for i, wc in enumerate(frag_len):
-        if wc > max_wc:
-            max_wc = wc
-            max_i = i
+    frag_tup_list = [[priority, fragment, centroid] for priority, fragment, centroid in zip(centroid_priority, good_f_fragments, centroids)]
+    sorted_f_t_l = sort_by_priority(frag_tup_list)
+    
+    # Navigate to nearest fragment that really needs exploring
+    if not reachable_goal:
+        i = rand.randint(0, len(sorted_f_t_l) - 1)
+        cur_pos = get_cur_pos()
+        cur_goal = Point()
+        cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*0.7
+        cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*0.7
+        print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, ']'
+    else:
+        cur_pos = get_cur_pos()
+        cur_goal = Point()
+        cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*0.7
+        cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*0.7
+        print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
-    # The most heavily weighted centroid aka nearest fragment closest to completion
-    best_sol = centroids[max_i]
-    cur_pos = get_cur_pos()
-    cur_goal = Point()
-    cur_goal.x = cur_pos.x + int(0.25*(best_sol.x - cur_pos.x))
-    cur_goal.y = cur_pos.y + int(0.25*(best_sol.y - cur_pos.y))
-    print 'DEBUG_cur_goal_UPDATE:'
-    print cur_goal
-
-    print 'frontier cells remaining:', len(frontier_cells)
+    print 'Remaining Frontier Fragments: [', len(good_f_fragments), ']'
 
 
 # -------------------------------------------Main Function---------------------------------------------
@@ -378,34 +375,32 @@ if __name__ == '__main__':
     rospy.init_node('hero_rbe3002_final')
 
     # Global Variables for Navigation
-    global odom_list, at_goal, cur_goal, cost_threshold
+    global odom_list, at_goal, cur_goal, cost_threshold, reachable_goal
     odom_list = tf.TransformListener()
     at_goal = True
     cur_goal = None
-    cost_threshold = 30
+    cost_threshold = 25
+    reachable_goal = True
 
     # Subscribers
     rospy.Subscriber('/odom', Odometry, read_odom)
-    rospy.Subscriber('/move_base/global_costmap/costmap', OccupancyGrid, cost_map_callback)
-    rospy.Subscriber('/move_base/global_costmap/costmap_updates', OccupancyGridUpdate, cost_map_update_callback)
-    rospy.Subscriber('/move_base/local_costmap/costmap', OccupancyGrid, local_cost_map_callback)
     rospy.Subscriber('/move_base/status', GoalStatusArray, move_status_callback)
 
     # Publishers
-    global wall_pub, path_pub, frontier_pub
+    global wall_pub, path_pub, frontier_pub, move_base_cancel
     wall_pub = rospy.Publisher('/wall_gc', GridCells, queue_size=1)
     path_pub = rospy.Publisher('/path_gc', GridCells, queue_size=1)
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
+    move_base_cancel = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
 
     # Move Base Action Library
     move_base = actionlib.SimpleActionClient('move_base', MoveBaseAction) # /movebase_simple/goal/
     move_base.wait_for_server(rospy.Duration(5))
     
-    rospy.sleep(rospy.Duration(5,0))
-    while cur_goal == None and not rospy.is_shutdown():
-        pass
-
-    rospy.Timer(rospy.Duration(5), request_map)
+    request_map(None)
+    rospy.sleep(rospy.Duration(5))
     detect_frontiers()
     move_to_next_waypoint()
+    rospy.Timer(rospy.Duration(5), request_map)
+
     rospy.spin()

@@ -6,8 +6,9 @@ Panels:
       Expanded:
         - /TF1/Frames1
         - /TF1/Tree1
-        - /Local Planning1
+        - /Local Planning1/Costmap1
         - /Global Planning1
+        - /Global Planning1/Costmap1
         - /Frontier1
       Splitter Ratio: 0.5
     Tree Height: 503
@@ -252,7 +253,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/Group
       Displays:
-        - Alpha: 0.7
+        - Alpha: 0.2
           Class: rviz/Map
           Color Scheme: costmap
           Draw Behind: false
@@ -322,7 +323,7 @@ Visualization Manager:
       Name: Local Planning
     - Class: rviz/Group
       Displays:
-        - Alpha: 0.4
+        - Alpha: 0.3
           Class: rviz/Map
           Color Scheme: costmap
           Draw Behind: true
@@ -330,7 +331,7 @@ Visualization Manager:
           Name: Costmap
           Topic: /move_base/global_costmap/costmap
           Value: true
-      Enabled: false
+      Enabled: true
       Name: Global Planning
     - Alpha: 1
       Axes Length: 1
@@ -407,7 +408,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 10.8266
+      Distance: 17.7829
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.06
         Stereo Focal Distance: 1

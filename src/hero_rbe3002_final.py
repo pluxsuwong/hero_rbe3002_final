@@ -40,14 +40,12 @@ def move_status_callback(msg):
                 if 2 <= goal.status <= 3:
                     at_goal = True
                     print "Status Received: GOOD STOP [", goal.status, ']'
-                    detect_frontiers()
                     move_to_next_waypoint()
                 elif 4 <= goal.status <= 5:  # Goal unreachable or rejected
                     at_goal = True
                     reachable_goal = False
                     print "Status Received: BAD STOP [", goal.status, ']'
                     move_base_cancel.publish(GoalID())
-                    detect_frontiers()
                     move_to_next_waypoint()
 
 # Odometry Callback function.
@@ -74,14 +72,28 @@ def grid_to_world(g_pt):
 # Get cell neighbors
 def get_neighbors(cell):
     neighbors = []
-
+    # 8 neighbors
+    '''
     for y in range(cell.y - 1, cell.y + 2):
         for x in range(cell.x - 1, cell.x + 2):
             if y < 0 or x < 0 or (y == cell.y and x == cell.x) or y >= map_height or x >= map_width:
                 continue
             else:
                 neighbors.append(Point(x, y, 0))
-
+    '''
+    # 4 neighbors
+    x, y = cell.x+1, cell.y
+    if not (y < 0 or x < 0 or y >= map_height or x >= map_width):
+        neighbors.append(Point(x, y, 0))
+    x, y = cell.x-1, cell.y
+    if not (y < 0 or x < 0 or y >= map_height or x >= map_width):
+        neighbors.append(Point(x, y, 0))
+    x, y = cell.x, cell.y+1
+    if not (y < 0 or x < 0 or y >= map_height or x >= map_width):
+        neighbors.append(Point(x, y, 0))
+    x, y = cell.x, cell.y-1
+    if not (y < 0 or x < 0 or y >= map_height or x >= map_width):
+        neighbors.append(Point(x, y, 0))
     return neighbors
 
 # Check if cell has cost of -1 and atleast 1 known cell
@@ -173,7 +185,7 @@ def cur_dist_to_cell(cell):
 def request_map(event):
     get_map_srv = rospy.ServiceProxy('/dynamic_map', GetMap)
     cost_map_callback(get_map_srv().map)
-    detect_frontiers()
+    #detect_frontiers()
 
 
 def sort_by_x(cell_list):
@@ -196,17 +208,35 @@ def index_to_pos(index):
     return Point(index%map_width, int(index/map_width), 0)
 
 def frontier_bfs():
+
+    frontier_cells, visited, queue = set([]), set([]), []
     cur_pos = get_cur_pos()
     start = pos_to_index(cur_pos)
+    '''
     start_n_pt_0 = get_neighbors(cur_pos)
     start_n_pt_1 = set([])
+    start_n_pt_2 = set([])
     for n_1 in start_n_pt_1:
-        start_n_pt = get_neighbors(n_1)
-        for n in start_n_pt:
+        start_n_pt_2 = get_neighbors(n_1)
+        for n_2 in start_n_pt_2:
+            start_n_pt = get_neighbors(n_2)
+            for n in start_n_pt:
+                start_n_pt_2.add(n)
             start_n_pt_1.add(n)
-    start_n_pt = list(start_n_pt_1)
+    '''
+    start_n_pt = []
+    y_min = cur_pos.y - 2
+    y_max = cur_pos.y + 2
+    x_min = cur_pos.x - 2
+    x_max = cur_pos.x + 2
+    for y in range(cur_pos.y - 2, cur_pos.y + 3):
+        for x in range(cur_pos.x - 2, cur_pos.x + 3):
+            if y == y_min or y == y_max or x == x_min or x == x_max:
+                start_n_pt.append(Point(x, y, 0))
+            else:
+                visited.add(pos_to_index(Point(x, y, 0)))
     start_n = map(pos_to_index, start_n_pt)
-    frontier_cells, visited, queue = set([]), set([]), []
+
     queue.append(start)
     queue.extend(start_n)
     # While there's stuff in the queue
@@ -286,6 +316,7 @@ def update_frontier():
 # Move to Next Waypoint
 def move_to_next_waypoint():
     global move_base
+    detect_frontiers()
     goal_pose = MoveBaseGoal()
     goal_pose.target_pose.header.frame_id = 'map'
     goal_pose.target_pose.header.stamp = rospy.Time.now()
@@ -354,8 +385,8 @@ def detect_frontiers():
         i = rand.randint(0, len(sorted_f_t_l) - 1)
         cur_pos = get_cur_pos()
         cur_goal = Point()
-        cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*0.7
-        cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*0.7
+        cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*0.8
+        cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*0.8
         print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, ']'
     else:
         cur_pos = get_cur_pos()
@@ -389,7 +420,6 @@ if __name__ == '__main__':
     # Publishers
     global wall_pub, path_pub, frontier_pub, move_base_cancel
     wall_pub = rospy.Publisher('/wall_gc', GridCells, queue_size=1)
-    path_pub = rospy.Publisher('/path_gc', GridCells, queue_size=1)
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
     move_base_cancel = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
 
@@ -399,7 +429,6 @@ if __name__ == '__main__':
     
     request_map(None)
     rospy.sleep(rospy.Duration(5))
-    detect_frontiers()
     move_to_next_waypoint()
     rospy.Timer(rospy.Duration(5), request_map)
 

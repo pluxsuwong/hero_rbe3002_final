@@ -7,7 +7,6 @@ Panels:
         - /TF1/Frames1
         - /TF1/Tree1
         - /Local Planning1/Costmap1
-        - /Global Planning1
         - /Global Planning1/Costmap1
         - /Frontier1
       Splitter Ratio: 0.5
@@ -256,7 +255,7 @@ Visualization Manager:
         - Alpha: 0.2
           Class: rviz/Map
           Color Scheme: costmap
-          Draw Behind: false
+          Draw Behind: true
           Enabled: true
           Name: Costmap
           Topic: /move_base/local_costmap/costmap
@@ -319,7 +318,7 @@ Visualization Manager:
           Use Fixed Frame: true
           Use rainbow: false
           Value: true
-      Enabled: false
+      Enabled: true
       Name: Local Planning
     - Class: rviz/Group
       Displays:

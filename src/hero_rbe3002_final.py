@@ -25,13 +25,13 @@ def cost_map_callback(msg):
     # Create cost_map 2D array
     cost_map = [[cell_costs[y*map_width + x] for x in range(map_width)] for y in range(map_height)]
 
-    #detect_frontiers()
     #move_base_cancel.publish(GoalID())
-    move_to_next_waypoint()
+    detect_frontiers()
+    #move_to_next_waypoint()
 
 # Check if turtlebot has 
 def move_status_callback(msg):
-    global move_base_cancel, life_cntr
+    global move_base_cancel
     global last_active_goal, at_goal, reachable_goal
     for goal in msg.status_list:
         if goal.status < 2:
@@ -43,13 +43,11 @@ def move_status_callback(msg):
                 if  goal.status == 2 or goal.status == 3:
                     at_goal = True
                     print "Status Received: GOOD STOP [", goal.status, ']'
-                    life_cntr = 10
                     move_to_next_waypoint()
                 elif goal.status == 4 or goal.status == 5:  # Goal unreachable or rejected
                     at_goal = True
                     reachable_goal = False
                     print "Status Received: BAD STOP [", goal.status, ']'
-                    life_cntr -= 1
                     move_base_cancel.publish(GoalID())
                     move_to_next_waypoint()
 
@@ -212,9 +210,9 @@ def request_map(event):
 def sort_by_x(cell_list):
     return sorted(cell_list, key=lambda x: x.x, reverse=True)
 
-# Sort a frontier fragment list by "priority" (length/distance)
+# Sort a frontier fragment list by "priority" (length/distance) <Currently low val == high priority>
 def sort_by_priority(frag_list):
-    return sorted(frag_list, key=lambda x: x[0], reverse=True)
+    return sorted(frag_list, key=lambda x: x[0], reverse=False)
 
 # Get turtlebot's current position
 def get_cur_pos():
@@ -312,7 +310,7 @@ def filter_fragments(frag_list):
                 max_y = cell_1.y
             '''
         #max_dist = math.sqrt((max_x - min_x)**2 + (max_y - min_y)**2)
-        if max_dist > 7:
+        if max_dist > ROBOT_WIDTH:
             good_frags.append(fragment)
 
     return good_frags
@@ -369,7 +367,7 @@ def move_to_next_waypoint():
 
 # Detect Frontier cells
 def detect_frontiers():
-    global cur_goal, reachable_goal
+    global cur_goal, reachable_goal, life_cntr
     
     # Obtain frontier cells
     frontier_cells = update_frontier()
@@ -384,8 +382,8 @@ def detect_frontiers():
     good_f_fragments = filter_fragments(frontier_fragments)
 
     # If there are no good_f_fragments, mapping is done
-    if len(good_f_fragments) == 0 or life_cntr == 0:
-        print "=====================Exploration Complete======================="
+    if len(good_f_fragments) == 0 or life_cntr <= 0:
+        print "==================Exploration Complete==================="
         at_goal = True
         rospy.signal_shutdown("Exploration Complete")
         exit()
@@ -417,16 +415,18 @@ def detect_frontiers():
         cur_goal = Point()
         cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*NAV_GAIN
         cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*NAV_GAIN
+        life_cntr -= 1
         print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, ']'
     else:
         # Navigate to nearest fragment that really needs exploring
         '''
         cur_pos = get_cur_pos()
         cur_goal = Point()
-        cur_goal.x = cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*NAV_GAIN
-        cur_goal.y = cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*NAV_GAIN
+        cur_goal.x = cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9
+        cur_goal.y = cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*0.9
         '''
         cur_goal = sorted_f_t_l[0][2]
+        life_cntr = 20
         print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
     print 'Remaining Frontier Fragments: [', len(good_f_fragments), ']'
@@ -440,11 +440,12 @@ if __name__ == '__main__':
     rospy.init_node('hero_rbe3002_final')
 
     # Modifiable global variables
-    global COST_THRESHOLD, NAV_GAIN
+    global COST_THRESHOLD, NAV_GAIN, ROBOT_WIDTH
     # data values in the costmap above the cost threshold indicate occupancy by an object
-    COST_THRESHOLD = 25
+    COST_THRESHOLD = 15
     # 0.7 is an arbitrary gain chosen to prevent concave frontiers from resulting in unreachable goals
     NAV_GAIN = 0.7
+    ROBOT_WIDTH = 6
 
     # Global Variables for Navigation
     global at_goal, cur_goal, reachable_goal, life_cntr
@@ -452,7 +453,7 @@ if __name__ == '__main__':
     at_goal = True
     cur_goal = None
     reachable_goal = True
-    life_cntr = 10
+    life_cntr = 20
 
     # Subscribers
     rospy.Subscriber('/odom', Odometry, read_odom)

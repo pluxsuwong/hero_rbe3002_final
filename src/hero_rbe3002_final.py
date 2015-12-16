@@ -26,13 +26,13 @@ def cost_map_callback(msg):
     cost_map = [[cell_costs[y*map_width + x] for x in range(map_width)] for y in range(map_height)]
 
     #move_base_cancel.publish(GoalID())
-    detect_frontiers()
-    #move_to_next_waypoint()
+    #detect_frontiers()
+    move_to_next_waypoint()
 
 # Check if turtlebot has 
 def move_status_callback(msg):
     global move_base_cancel
-    global last_active_goal, at_goal, reachable_goal
+    global last_active_goal, at_goal, reachable_goal, life_cntr
     for goal in msg.status_list:
         if goal.status < 2:
             last_active_goal = goal
@@ -42,13 +42,14 @@ def move_status_callback(msg):
             if goal.goal_id.id == last_active_goal.goal_id.id:
                 if  goal.status == 2 or goal.status == 3:
                     at_goal = True
+                    life_cntr = 15
                     print "Status Received: GOOD STOP [", goal.status, ']'
                     move_to_next_waypoint()
                 elif goal.status == 4 or goal.status == 5:  # Goal unreachable or rejected
                     at_goal = True
                     reachable_goal = False
                     print "Status Received: BAD STOP [", goal.status, ']'
-                    move_base_cancel.publish(GoalID())
+                    #move_base_cancel.publish(GoalID())
                     move_to_next_waypoint()
 
 # Odometry Callback function.
@@ -210,9 +211,9 @@ def request_map(event):
 def sort_by_x(cell_list):
     return sorted(cell_list, key=lambda x: x.x, reverse=True)
 
-# Sort a frontier fragment list by "priority" (length/distance) <Currently low val == high priority>
+# Sort a frontier fragment list by "priority" (length/distance) <Currently high val == high priority>
 def sort_by_priority(frag_list):
-    return sorted(frag_list, key=lambda x: x[0], reverse=False)
+    return sorted(frag_list, key=lambda x: x[0], reverse=True)
 
 # Get turtlebot's current position
 def get_cur_pos():
@@ -348,26 +349,28 @@ def update_frontier():
 def move_to_next_waypoint():
     global move_base
     detect_frontiers()
-    goal_pose = MoveBaseGoal()
-    goal_pose.target_pose.header.frame_id = 'map'
-    goal_pose.target_pose.header.stamp = rospy.Time.now()
-    goal_pose.target_pose.pose.position = grid_to_world(cur_goal)
+    #goal_pose = MoveBaseGoal()
+    goal_pose = PoseStamped()
+    goal_pose.header.frame_id = 'map'
+    goal_pose.header.stamp = rospy.Time.now()
+    goal_pose.pose.position = grid_to_world(cur_goal)
     # Modify orientation to face movement heading
-    dx = goal_pose.target_pose.pose.position.x - pose.pose.position.x
-    dy = goal_pose.target_pose.pose.position.y - pose.pose.position.y
+    dx = goal_pose.pose.position.x - pose.pose.position.x
+    dy = goal_pose.pose.position.y - pose.pose.position.y
     new_ori = math.atan2(dy, dx)
     o_x, o_y, o_z, o_w = quaternion_from_euler(0.0, 0.0, new_ori)
-    goal_pose.target_pose.pose.orientation.x = o_x
-    goal_pose.target_pose.pose.orientation.y = o_y
-    goal_pose.target_pose.pose.orientation.z = o_z
-    goal_pose.target_pose.pose.orientation.w = o_w
+    goal_pose.pose.orientation.x = o_x
+    goal_pose.pose.orientation.y = o_y
+    goal_pose.pose.orientation.z = o_z
+    goal_pose.pose.orientation.w = o_w
 
     # Navigate to goal_pose
-    move_base.send_goal(goal_pose)
+    move_base.publish(goal_pose)
+    #move_base.send_goal(goal_pose)
 
 # Detect Frontier cells
 def detect_frontiers():
-    global cur_goal, reachable_goal, life_cntr
+    global move_base_cancel, cur_goal, reachable_goal, life_cntr
     
     # Obtain frontier cells
     frontier_cells = update_frontier()
@@ -401,7 +404,7 @@ def detect_frontiers():
     centroid_priority = []
     for i in range(len(distances)):
         try:
-            centroid_priority.append((2*frag_len[i])**2 / distances[i])
+            centroid_priority.append((frag_len[i]**2 / distances[i]))
         except ZeroDivisionError:
             print 'Division by 0 in detect_frontiers()'
     
@@ -410,23 +413,32 @@ def detect_frontiers():
     
     if not reachable_goal:
         # Obtain random goal since current goal is unreachable
+        move_base_cancel.publish(GoalID())
         i = rand.randint(0, len(sorted_f_t_l) - 1)
         cur_pos = get_cur_pos()
         cur_goal = Point()
-        cur_goal.x = cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*NAV_GAIN
-        cur_goal.y = cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*NAV_GAIN
+        cur_goal.x = int(cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*NAV_GAIN)
+        cur_goal.y = int(cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*NAV_GAIN)
+        if len(sorted_f_t_l) == 1:
+            i = rand.randint(-7, 7)
+            j = rand.randint(-7, 7)
+            cur_goal.x += i
+            cur_goal.y += j
         life_cntr -= 1
-        print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, ']'
+        print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, '] [', life_cntr, ']'
     else:
         # Navigate to nearest fragment that really needs exploring
-        '''
+        
         cur_pos = get_cur_pos()
         cur_goal = Point()
-        cur_goal.x = cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9
-        cur_goal.y = cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*0.9
-        '''
-        cur_goal = sorted_f_t_l[0][2]
-        life_cntr = 20
+        cur_goal.x = int(cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9)
+        cur_goal.y = int(cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*0.9)
+        i = rand.randint(-2, 2)
+        j = rand.randint(-2, 2)
+        cur_goal.x += i
+        cur_goal.y += j
+        # Maybe use nearest_empty_cell(sorted_f_t_l[0][2]) ???
+        life_cntr = 15
         print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
     print 'Remaining Frontier Fragments: [', len(good_f_fragments), ']'
@@ -453,21 +465,18 @@ if __name__ == '__main__':
     at_goal = True
     cur_goal = None
     reachable_goal = True
-    life_cntr = 20
+    life_cntr = 30
 
     # Subscribers
     rospy.Subscriber('/odom', Odometry, read_odom)
     rospy.Subscriber('/move_base/status', GoalStatusArray, move_status_callback)
 
     # Publishers
-    global frontier_pub, move_base_cancel, rotate_pub
+    global frontier_pub, move_base_cancel, move_base
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
     move_base_cancel = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
-    rotate_pub = rospy.Publisher('/cmd_vel_mux/input/teleop', Twist, queue_size=1)
+    move_base = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
 
-    # Move Base Action Library
-    move_base = actionlib.SimpleActionClient('move_base', MoveBaseAction) # /movebase_simple/goal/
-    move_base.wait_for_server(rospy.Duration(5))
     # Initialize costmap
     request_map(None)
     # Give program time to run

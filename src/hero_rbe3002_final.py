@@ -25,13 +25,11 @@ def cost_map_callback(msg):
     # Create cost_map 2D array
     cost_map = [[cell_costs[y*map_width + x] for x in range(map_width)] for y in range(map_height)]
 
-    #move_base_cancel.publish(GoalID())
     #detect_frontiers()
     move_to_next_waypoint()
 
 # Check if turtlebot has 
 def move_status_callback(msg):
-    global move_base_cancel
     global last_active_goal, at_goal, reachable_goal, life_cntr
     for goal in msg.status_list:
         if goal.status < 2:
@@ -49,7 +47,6 @@ def move_status_callback(msg):
                     at_goal = True
                     reachable_goal = False
                     print "Status Received: BAD STOP [", goal.status, ']'
-                    #move_base_cancel.publish(GoalID())
                     move_to_next_waypoint()
 
 # Odometry Callback function.
@@ -192,18 +189,6 @@ def cur_dist_to_cell(cell):
 
 # Request a costmap update
 def request_map(event):
-    global rotate_pub
-    '''
-    if event == None:
-        # Rotate
-        twist_msg = Twist()
-        twist_msg.angular.z = 1
-        now = rospy.Time.now().secs
-        while rospy.Time.now().secs - now <= 2 and not rospy.is_shutdown():
-            rotate_pub.publish(twist_msg)
-        twist_msg.angular.z = 0
-        rotate_pub.publish(twist_msg)
-    '''
     get_map_srv = rospy.ServiceProxy('/dynamic_map', GetMap)
     cost_map_callback(get_map_srv().map)
 
@@ -349,7 +334,6 @@ def update_frontier():
 def move_to_next_waypoint():
     global move_base
     detect_frontiers()
-    #goal_pose = MoveBaseGoal()
     goal_pose = PoseStamped()
     goal_pose.header.frame_id = 'map'
     goal_pose.header.stamp = rospy.Time.now()
@@ -366,11 +350,10 @@ def move_to_next_waypoint():
 
     # Navigate to goal_pose
     move_base.publish(goal_pose)
-    #move_base.send_goal(goal_pose)
 
 # Detect Frontier cells
 def detect_frontiers():
-    global move_base_cancel, cur_goal, reachable_goal, life_cntr
+    global cur_goal, reachable_goal, life_cntr
     
     # Obtain frontier cells
     frontier_cells = update_frontier()
@@ -413,7 +396,6 @@ def detect_frontiers():
     
     if not reachable_goal:
         # Obtain random goal since current goal is unreachable
-        move_base_cancel.publish(GoalID())
         i = rand.randint(0, len(sorted_f_t_l) - 1)
         cur_pos = get_cur_pos()
         cur_goal = Point()
@@ -428,7 +410,6 @@ def detect_frontiers():
         print 'Unreachable Goal, Replacing With: [', cur_goal.x, ',', cur_goal.y, '] [', life_cntr, ']'
     else:
         # Navigate to nearest fragment that really needs exploring
-        
         cur_pos = get_cur_pos()
         cur_goal = Point()
         cur_goal.x = int(cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9)
@@ -437,7 +418,6 @@ def detect_frontiers():
         j = rand.randint(-2, 2)
         cur_goal.x += i
         cur_goal.y += j
-        # Maybe use nearest_empty_cell(sorted_f_t_l[0][2]) ???
         life_cntr = 15
         print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
@@ -454,7 +434,7 @@ if __name__ == '__main__':
     # Modifiable global variables
     global COST_THRESHOLD, NAV_GAIN, ROBOT_WIDTH
     # data values in the costmap above the cost threshold indicate occupancy by an object
-    COST_THRESHOLD = 15
+    COST_THRESHOLD = 60
     # 0.7 is an arbitrary gain chosen to prevent concave frontiers from resulting in unreachable goals
     NAV_GAIN = 0.7
     ROBOT_WIDTH = 6
@@ -472,9 +452,8 @@ if __name__ == '__main__':
     rospy.Subscriber('/move_base/status', GoalStatusArray, move_status_callback)
 
     # Publishers
-    global frontier_pub, move_base_cancel, move_base
+    global frontier_pub, move_base
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
-    move_base_cancel = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
     move_base = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
 
     # Initialize costmap

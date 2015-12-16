@@ -12,6 +12,15 @@ from nav_msgs.srv import GetMap
 
 #---------------------------------------Callback Functions--------------------------------------------
 
+# Finish everything
+def finish():
+    global at_goal
+    print "==================Exploration Complete==================="
+    at_goal = True
+    rospy.signal_shutdown("Exploration Complete")
+    exit()
+
+
 # Stores received costmap in global 2-D array structure
 def cost_map_callback(msg):
     global map_width, map_height, cost_map, cell_res, map_origin
@@ -21,16 +30,17 @@ def cost_map_callback(msg):
     cell_costs = msg.data
     cell_res = msg.info.resolution
     map_origin = msg.info.origin.position
-
+    print 'TIMER: [', rospy.get_rostime().secs - START_TIME, ']'
     # Create cost_map 2D array
     cost_map = [[cell_costs[y*map_width + x] for x in range(map_width)] for y in range(map_height)]
-
+    if rospy.get_rostime().secs - START_TIME > 720:
+        finish()
     #detect_frontiers()
     move_to_next_waypoint()
 
 # Check if turtlebot has 
 def move_status_callback(msg):
-    global last_active_goal, at_goal, reachable_goal, life_cntr
+    global last_active_goal, at_goal, reachable_goal, life_cntr, checkpoint
     for goal in msg.status_list:
         if goal.status < 2:
             last_active_goal = goal
@@ -41,6 +51,7 @@ def move_status_callback(msg):
                 if  goal.status == 2 or goal.status == 3:
                     at_goal = True
                     life_cntr = 15
+                    checkpoint = rospy.get_rostime().secs
                     print "Status Received: GOOD STOP [", goal.status, ']'
                     move_to_next_waypoint()
                 elif goal.status == 4 or goal.status == 5:  # Goal unreachable or rejected
@@ -353,7 +364,7 @@ def move_to_next_waypoint():
 
 # Detect Frontier cells
 def detect_frontiers():
-    global cur_goal, reachable_goal, life_cntr
+    global cur_goal, reachable_goal, life_cntr, checkpoint
     
     # Obtain frontier cells
     frontier_cells = update_frontier()
@@ -369,11 +380,7 @@ def detect_frontiers():
 
     # If there are no good_f_fragments, mapping is done
     if len(good_f_fragments) == 0 or life_cntr <= 0:
-        print "==================Exploration Complete==================="
-        at_goal = True
-        rospy.signal_shutdown("Exploration Complete")
-        exit()
-
+        finish()
     # Calculate the centroids of all of the frontiers
     centroids = calc_centroids(good_f_fragments)
 
@@ -401,7 +408,7 @@ def detect_frontiers():
         cur_goal = Point()
         cur_goal.x = int(cur_pos.x + (sorted_f_t_l[i][2].x - cur_pos.x)*NAV_GAIN)
         cur_goal.y = int(cur_pos.y + (sorted_f_t_l[i][2].y - cur_pos.y)*NAV_GAIN)
-        if len(sorted_f_t_l) == 1:
+        if len(sorted_f_t_l) <= 3:
             i = rand.randint(-7, 7)
             j = rand.randint(-7, 7)
             cur_goal.x += i
@@ -414,10 +421,10 @@ def detect_frontiers():
         cur_goal = Point()
         cur_goal.x = int(cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9)
         cur_goal.y = int(cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*0.9)
-        i = rand.randint(-2, 2)
-        j = rand.randint(-2, 2)
-        cur_goal.x += i
-        cur_goal.y += j
+        i = rand.randint(-1, 1)
+        j = rand.randint(-1, 1)
+        cur_goal.x += i*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
+        cur_goal.y += j*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
         life_cntr = 15
         print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
@@ -432,20 +439,22 @@ if __name__ == '__main__':
     rospy.init_node('hero_rbe3002_final')
 
     # Modifiable global variables
-    global COST_THRESHOLD, NAV_GAIN, ROBOT_WIDTH
+    global COST_THRESHOLD, NAV_GAIN, ROBOT_WIDTH, START_TIME
     # data values in the costmap above the cost threshold indicate occupancy by an object
-    COST_THRESHOLD = 60
+    COST_THRESHOLD = 9
     # 0.7 is an arbitrary gain chosen to prevent concave frontiers from resulting in unreachable goals
     NAV_GAIN = 0.7
-    ROBOT_WIDTH = 6
+    ROBOT_WIDTH = 10
+    START_TIME = rospy.get_rostime().secs
 
     # Global Variables for Navigation
-    global at_goal, cur_goal, reachable_goal, life_cntr
+    global at_goal, cur_goal, reachable_goal, life_cntr, checkpoint
     # odom_list = tf.TransformListener()
     at_goal = True
     cur_goal = None
     reachable_goal = True
     life_cntr = 30
+    checkpoint = rospy.get_rostime().secs
 
     # Subscribers
     rospy.Subscriber('/odom', Odometry, read_odom)
@@ -454,7 +463,7 @@ if __name__ == '__main__':
     # Publishers
     global frontier_pub, move_base
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
-    move_base = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
+    move_base = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=5)
 
     # Initialize costmap
     request_map(None)

@@ -421,10 +421,19 @@ def detect_frontiers():
         cur_goal = Point()
         cur_goal.x = int(cur_pos.x + (sorted_f_t_l[0][2].x - cur_pos.x)*0.9)
         cur_goal.y = int(cur_pos.y + (sorted_f_t_l[0][2].y - cur_pos.y)*0.9)
-        i = rand.randint(-1, 1)
-        j = rand.randint(-1, 1)
-        cur_goal.x += i*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
-        cur_goal.y += j*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
+        # Use entropy to prevent robot from getting stuck
+        i = rand.randint(-1, 1)*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
+        j = rand.randint(-1, 1)*(int(math.sqrt(rospy.get_rostime().secs - checkpoint)*NAV_GAIN))
+        if i < -10:
+            i = rand.randint(-10, 0)
+        elif i > 10:
+            i = rand.randint(0, 10)
+        if j < -10:
+            j = rand.randint(-10, 0)
+        elif j > 10:
+            j = rand.randint(0, 10)
+        cur_goal.x += i
+        cur_goal.y += j
         life_cntr = 15
         print 'Navigating to New Goal: [', cur_goal.x, ',', cur_goal.y, ']'
 
@@ -444,7 +453,7 @@ if __name__ == '__main__':
     COST_THRESHOLD = 9
     # 0.7 is an arbitrary gain chosen to prevent concave frontiers from resulting in unreachable goals
     NAV_GAIN = 0.7
-    ROBOT_WIDTH = 10
+    ROBOT_WIDTH = 8
     START_TIME = rospy.get_rostime().secs
 
     # Global Variables for Navigation
@@ -465,6 +474,7 @@ if __name__ == '__main__':
     frontier_pub = rospy.Publisher('/frontier_gc', GridCells, queue_size=1)
     move_base = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=5)
 
+    rospy.sleep(rospy.Duration(5))
     # Initialize costmap
     request_map(None)
     # Give program time to run
